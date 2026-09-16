@@ -5,9 +5,10 @@ spring:
     ollama:
       base-url: http://localhost:11434
       chat:
-        model: qwen:1.8b
+        model: qwen2.5:7b
         temperature: 0.7
         num-predict: 1024
+
   #  ai:
   #    openai:
   #      base-url: https://api.moonshot.cn/v1

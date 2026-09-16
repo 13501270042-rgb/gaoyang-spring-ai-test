@@ -8,6 +8,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
+import java.util.concurrent.TimeoutException;
+
 /**
  * @author: gaoyang
  * @Description:
@@ -18,11 +21,13 @@ public class HelloController {
     @Autowired
     ChatClient chatClient;
 
-    @RequestMapping("/hello")
+    @RequestMapping(value = "/hello", produces = {"text/html;charset=UTF-8"})
     public Flux<String> hello(String msg,
                               @RequestParam(defaultValue = "session001") String cid) {
         return chatClient.prompt(msg).advisors(a -> a.param(ChatMemory.CONVERSATION_ID, cid))
                 .stream()
-                .content();
+                .content()
+                .timeout(Duration.ofSeconds(10))
+                .onErrorResume(TimeoutException.class, e -> Flux.just("请求超时，请稍后重试"));
     }
 }
