@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: gaoyang-spring-ai
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        model: qwen:1.8b
+        temperature: 0.7
+        num-predict: 1024
+  #  ai:
+  #    openai:
+  #      base-url: https://api.moonshot.cn/v1
+  #      api-key: sk-Ui7zPguGRi5npXEzUAUnf50XOJWLQy63NGG9RqNFG03BDU7T
+  #      chat:
+  #        options:
+  #          model: moonshot-v1-8k
+  #          temperature: 0.7
+  #          max-tokens: 1024
