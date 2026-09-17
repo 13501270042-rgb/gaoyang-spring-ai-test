@@ -12,14 +12,10 @@ import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 
 @Configuration
-public class AiConfig {
+public class ChatClientConfig {
 
-    /**
-     * 内存会话记忆，最多保留10条消息，重启丢失
-     */
     @Bean
     public ChatMemory chatMemory() {
         return MessageWindowChatMemory.builder()
@@ -28,11 +24,18 @@ public class AiConfig {
     }
 
     @Bean
-    @Primary
-    public ChatClient chatClient(OllamaChatModel chatModel) {
+    public ChatClient weatherChatClient(OllamaChatModel chatModel) {
         return ChatClient.builder(chatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory()).build())
-                .defaultSystem("你是小高机器人,回答简洁专业")
+                .defaultSystem("你是天气播报员,回答关于天气相关问题")
+                .build();
+    }
+
+    @Bean
+    public ChatClient mathChatClient(OllamaChatModel chatModel) {
+        return ChatClient.builder(chatModel)
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory()).build())
+                .defaultSystem("你是数学老师,回答关于数学相关问题")
                 .build();
     }
 }

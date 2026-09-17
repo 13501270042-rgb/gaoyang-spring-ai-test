@@ -8,13 +8,12 @@ spring:
         model: qwen2.5:7b
         temperature: 0.7
         num-predict: 1024
+  datasource:
+    url: jdbc:postgresql://localhost:5432/postgres
+    username: postgres
+    password: gy5211314
+    driver-class-name: org.postgresql.Driver
 
-  #  ai:
-  #    openai:
-  #      base-url: https://api.moonshot.cn/v1
-  #      api-key: sk-Ui7zPguGRi5npXEzUAUnf50XOJWLQy63NGG9RqNFG03BDU7T
-  #      chat:
-  #        options:
-  #          model: moonshot-v1-8k
-  #          temperature: 0.7
-  #          max-tokens: 1024
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

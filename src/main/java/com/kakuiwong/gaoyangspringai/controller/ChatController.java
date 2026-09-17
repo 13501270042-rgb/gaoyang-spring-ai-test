@@ -16,15 +16,16 @@ import java.util.concurrent.TimeoutException;
  * @Description:
  */
 @RestController
-public class HelloController {
+public class ChatController {
 
     @Autowired
-    ChatClient chatClient;
+    ChatClient weatherChatClient;
 
     @RequestMapping(value = "/hello", produces = {"text/html;charset=UTF-8"})
     public Flux<String> hello(String msg,
-                              @RequestParam(defaultValue = "session001") String cid) {
-        return chatClient.prompt(msg).advisors(a -> a.param(ChatMemory.CONVERSATION_ID, cid))
+                              @RequestParam(defaultValue = "session001") String sessionId) {
+        return weatherChatClient.prompt(msg).advisors(
+                a -> a.param(ChatMemory.CONVERSATION_ID, sessionId))
                 .stream()
                 .content()
                 .timeout(Duration.ofSeconds(10))
