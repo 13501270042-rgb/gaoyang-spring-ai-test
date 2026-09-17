@@ -13,6 +13,7 @@ spring:
         repository:
           jdbc:
             initialize-schema: always
+
   data:
     redis:
       host: 127.0.0.1
@@ -27,3 +28,10 @@ spring:
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+logging:
+  level:
+    # 开启SimpleLoggerAdvisor的DEBUG日志
+    org.springframework.ai.chat.client.advisor: DEBUG
+    # 可选：打印底层http原始请求报文（OpenAI/兼容接口）
+    org.springframework.ai.openai: DEBUG
