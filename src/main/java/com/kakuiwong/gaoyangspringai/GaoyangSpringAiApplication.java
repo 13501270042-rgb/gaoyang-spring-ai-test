@@ -1,11 +1,11 @@
 package com.kakuiwong.gaoyangspringai;
 
-import org.springframework.ai.model.chat.memory.repository.redis.autoconfigure.RedisChatMemoryRepositoryAutoConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.ImportResource;
 
-@SpringBootApplication(exclude = {
-        RedisChatMemoryRepositoryAutoConfiguration.class})
+@SpringBootApplication
+@ImportResource("classpath:database.xml")
 public class GaoyangSpringAiApplication {
 
 

@@ -29,6 +29,7 @@ public class ChatController {
                 .stream()
                 .content()
                 .timeout(Duration.ofSeconds(10))
-                .onErrorResume(TimeoutException.class, e -> Flux.just("请求超时，请稍后重试"));
+                .onErrorResume(TimeoutException.class,
+                        e -> Flux.just("请求超时，请稍后重试:"+e.getMessage()));
     }
 }
