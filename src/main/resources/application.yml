@@ -13,6 +13,8 @@
         model: qwen2.5:7b
         temperature: 0.7
         num-predict: 1024
+      embedding:
+        model: nomic-embed-text
     chat:
       memory:
         repository:
@@ -30,6 +32,13 @@
           max-active: 8
           max-idle: 8
           min-idle: 2
+    vectorstore:
+      pgvector:
+        initialize-schema: always
+        dimensions: 768
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
