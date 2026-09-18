@@ -64,15 +64,25 @@
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let full = '';
+            let buffer = '';
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                const chunk = decoder.decode(value, { stream: true });
-                full += chunk;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (line.startsWith('data:')) {
+                        full += line.slice(5);
+                    }
+                }
                 aiDiv.textContent = full;
                 chatArea.scrollTop = chatArea.scrollHeight;
             }
-            if (!full) aiDiv.textContent = '(No response)';
+            if (buffer.startsWith('data:')) {
+                full += buffer.slice(5);
+            }
+            aiDiv.textContent = full || '(No response)';
         } catch (e) {
             aiDiv.textContent = 'Request failed: ' + e.message;
         } finally {
