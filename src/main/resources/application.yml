@@ -1,6 +1,11 @@
-spring:
+﻿spring:
   application:
     name: gaoyang-spring-ai
+  datasource:
+    url: jdbc:postgresql://localhost:5432/postgres
+    username: postgres
+    password: 123456
+    driver-class-name: org.postgresql.Driver
   ai:
     ollama:
       base-url: http://localhost:11434
@@ -31,8 +36,8 @@ mybatis-plus:
 
 logging:
   level:
-    # 开启SimpleLoggerAdvisor的DEBUG日志
+    # SimpleLoggerAdvisorDEBUG
     org.springframework.ai.chat.client.advisor: DEBUG
-    # 可选：打印底层http原始请求报文（OpenAI/兼容接口）
+    # OpenAI/HTTP
     org.springframework.ai.openai: DEBUG
     org.springframework.ai.ollama: DEBUG
