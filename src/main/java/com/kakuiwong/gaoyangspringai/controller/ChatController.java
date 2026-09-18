@@ -22,18 +22,10 @@ public class ChatController {
     ChatClient weatherChatClient;
     @Autowired
     ChatClient computerChatClient;
+    @Autowired
+    ChatClient supervisorChatClient;
 
-    /* @RequestMapping(value = "/hello", produces = {"text/html;charset=UTF-8"})
-     public Flux<String> hello(String msg,
-                               @RequestParam(defaultValue = "session001") String sessionId) {
-         String result = weatherChatClient.prompt(msg).advisors(
-                         a -> a.param(ChatMemory.CONVERSATION_ID, sessionId))
-                 .call()
-                 .content();
-         return Flux.just(result);
-     }
- */
-    @RequestMapping(value = "/hello", produces = {"text/html;charset=UTF-8"})
+  /*  @RequestMapping(value = "/weather", produces = {"text/html;charset=UTF-8"})
     public Flux<String> hello(String msg,
                               @RequestParam(defaultValue = "session001") String sessionId) {
         return weatherChatClient.prompt(msg).advisors(
@@ -53,6 +45,18 @@ public class ChatController {
                 .stream()
                 .content()
                 .timeout(Duration.ofSeconds(30))
+                .onErrorResume(TimeoutException.class,
+                        e -> Flux.just("请求超时，请稍后重试:" + e.getMessage()));
+    }*/
+
+    @RequestMapping(value = "/hello", produces = {"text/html;charset=UTF-8"})
+    public Flux<String> hello(String msg,
+                              @RequestParam(defaultValue = "session001") String sessionId) {
+        return supervisorChatClient.prompt(msg).advisors(
+                        a -> a.param(ChatMemory.CONVERSATION_ID, sessionId))
+                .stream()
+                .content()
+                .timeout(Duration.ofSeconds(60 * 3))
                 .onErrorResume(TimeoutException.class,
                         e -> Flux.just("请求超时，请稍后重试:" + e.getMessage()));
     }

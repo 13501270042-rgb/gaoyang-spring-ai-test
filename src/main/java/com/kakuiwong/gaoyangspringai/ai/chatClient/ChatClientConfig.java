@@ -5,10 +5,7 @@ package com.kakuiwong.gaoyangspringai.ai.chatClient;
  * @Description:
  */
 
-import com.kakuiwong.gaoyangspringai.ai.tools.ComputerAgentTool;
-import com.kakuiwong.gaoyangspringai.ai.tools.ComputerTool;
-import com.kakuiwong.gaoyangspringai.ai.tools.LocalLifeTool;
-import com.kakuiwong.gaoyangspringai.ai.tools.LocalWeatherTool;
+import com.kakuiwong.gaoyangspringai.ai.tools.*;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -30,6 +27,8 @@ public class ChatClientConfig {
     ComputerTool computerTool;
     @Autowired
     ComputerAgentTool computerAgentTool;
+    @Autowired
+    WeatherAgentTool weatherAgentTool;
 
     @Bean
     public ChatMemory chatMemory(JdbcChatMemoryRepository chatMemoryRepository) {
@@ -42,7 +41,7 @@ public class ChatClientConfig {
     @Bean
     public ChatClient computerChatClient(OllamaChatModel chatModel, ChatMemory chatMemory) {
         return ChatClient.builder(chatModel)
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                // .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .defaultSystem("你是计算机老师,回答相关问题")
                 .defaultTools(computerTool)
                 .build();
@@ -51,10 +50,18 @@ public class ChatClientConfig {
     @Bean
     public ChatClient weatherChatClient(OllamaChatModel chatModel, ChatMemory chatMemory) {
         return ChatClient.builder(chatModel)
-                .defaultAdvisors(
-                        MessageChatMemoryAdvisor.builder(chatMemory).build())
+                //.defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .defaultSystem("你是机器人客服,尽量使用自带工具查询结果,回答用户相关问题")
-                .defaultTools(localWeatherTool, localLifeTool, computerAgentTool)
+                .defaultTools(localWeatherTool, localLifeTool)
+                .build();
+    }
+
+    @Bean
+    public ChatClient supervisorChatClient(OllamaChatModel chatModel, ChatMemory chatMemory) {
+        return ChatClient.builder(chatModel)
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                .defaultSystem("你是任务调度主管，根据用户需求，调用合适的子Agent完成任务，汇总所有子Agent结果返回给用户")
+                .defaultTools(computerAgentTool, weatherAgentTool)
                 .build();
     }
 }

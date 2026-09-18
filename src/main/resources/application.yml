@@ -35,3 +35,4 @@ logging:
     org.springframework.ai.chat.client.advisor: DEBUG
     # 可选：打印底层http原始请求报文（OpenAI/兼容接口）
     org.springframework.ai.openai: DEBUG
+    org.springframework.ai.ollama: DEBUG
