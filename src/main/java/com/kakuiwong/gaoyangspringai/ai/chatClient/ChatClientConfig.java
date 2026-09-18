@@ -29,6 +29,8 @@ public class ChatClientConfig {
     ComputerAgentTool computerAgentTool;
     @Autowired
     WeatherAgentTool weatherAgentTool;
+    @Autowired
+    KnowledgeSearchTool knowledgeSearchTool;
 
     @Bean
     public ChatMemory chatMemory(JdbcChatMemoryRepository chatMemoryRepository) {
@@ -60,8 +62,9 @@ public class ChatClientConfig {
     public ChatClient supervisorChatClient(OllamaChatModel chatModel, ChatMemory chatMemory) {
         return ChatClient.builder(chatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultSystem("你是任务调度主管，根据用户需求，调用合适的子Agent完成任务，汇总所有子Agent结果返回给用户")
-                .defaultTools(computerAgentTool, weatherAgentTool)
+                .defaultSystem("你是任务调度主管，根据用户需求，调用合适的子Agent完成任务。" +
+                        "当用户问题涉及知识库内容时，使用知识库检索工具查询。汇总所有结果返回给用户")
+                .defaultTools(computerAgentTool, weatherAgentTool, knowledgeSearchTool)
                 .build();
     }
 }
