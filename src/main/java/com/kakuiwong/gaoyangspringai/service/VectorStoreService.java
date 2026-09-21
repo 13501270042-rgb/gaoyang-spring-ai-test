@@ -1,16 +1,19 @@
 package com.kakuiwong.gaoyangspringai.service;
 
 import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * @author: gaoyang
- * @Description: 向量化Service,将字符串写入PG向量数据库并支持检索
+ * @Description: 向量化Service, 将字符串写入PG向量数据库并支持检索
  */
 @Service
 public class VectorStoreService {
@@ -62,11 +65,25 @@ public class VectorStoreService {
      * @return 相似的文档列表
      */
     public List<Document> similaritySearch(String query, int topK) {
-        return vectorStore.similaritySearch(
+        List<Document> results = new ArrayList<>(vectorStore.similaritySearch(
                 SearchRequest.builder()
                         .query(query)
                         .topK(topK)
                         .build()
-        );
+        ));
+        results = results.stream()
+                .filter(doc -> {
+                    float score = (float) doc.getMetadata().getOrDefault("score", 0f);
+                    return score > 0.7;
+                })
+                .collect(Collectors.toList());
+        // 按相似度分数降序排列
+        results.sort(Comparator.comparingDouble(
+                (Document doc) -> {
+                    Object scoreObj = doc.getMetadata().getOrDefault("score", 1.0f);
+                    return ((Float) scoreObj).doubleValue();
+                }
+        ).reversed());
+        return results;
     }
 }

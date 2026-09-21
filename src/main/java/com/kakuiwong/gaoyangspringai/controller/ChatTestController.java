@@ -16,7 +16,7 @@ import java.time.Duration;
  * @Description:
  */
 @RestController
-public class ChatController {
+public class ChatTestController {
 
     @Autowired
     ChatClient supervisorChatClient;

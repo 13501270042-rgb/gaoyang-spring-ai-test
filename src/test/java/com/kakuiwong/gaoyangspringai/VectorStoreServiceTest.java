@@ -5,6 +5,7 @@ import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 import org.springframework.boot.test.context.SpringBootTest;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -68,20 +69,10 @@ CREATE INDEX ON vector_store USING HNSW (embedding vector_cosine_ops);*/
 
     @Test
     void testSimilaritySearch() {
-        // 先写入测试数据
-        vectorStoreService.addTexts(List.of(
-                "Java是一门面向对象的编程语言",
-                "Python适合数据分析和人工智能开发",
-                "PostgreSQL支持JSON和向量存储",
-                "Spring Boot简化了Java应用的开发流程",
-                "Docker容器化技术便于应用部署"
-        ));
-
         // 执行语义检索
-        List<Document> results = vectorStoreService.similaritySearch("Java开发框架", 3);
-        System.out.println("检索结果:");
-        for (int i = 0; i < results.size(); i++) {
-            System.out.println((i + 1) + ". " + results.get(i).getText());
-        }
+        List<Document> results = vectorStoreService.similaritySearch("天气", 3);
+        results.forEach(result->{
+            System.out.println(new ObjectMapper().writeValueAsString(result));
+        });
     }
 }

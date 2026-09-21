@@ -43,6 +43,9 @@ mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
+searxng:
+  base-url: http://localhost:8888
+
 logging:
   level:
     # SimpleLoggerAdvisorDEBUG
