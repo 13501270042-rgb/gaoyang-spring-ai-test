@@ -6,6 +6,7 @@ import com.kakuiwong.gaoyangspringai.entity.SpringAiChatMemory;
 import com.kakuiwong.gaoyangspringai.mapper.SpringAiChatMemoryMapper;
 import com.kakuiwong.gaoyangspringai.service.VectorStoreService;
 import com.kakuiwong.gaoyangspringai.service.WebSearchService;
+import com.kakuiwong.gaoyangspringai.util.ThreadPoolUtil;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.document.Document;
@@ -20,11 +21,13 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
  * @author: gaoyang
- * @Description: 手动整合：系统提示词 + 上下文管理(最大10条) + 向量检索(RAG) + SSE流式输出
+ * @Description: 手动整合
  */
 @RestController
 public class OriginChatTestController {
@@ -46,14 +49,21 @@ public class OriginChatTestController {
         SseEmitter emitter = new SseEmitter(3 * 60 * 1000L);
 
         // ===== 1. 手动添加系统提示词 =====
-        String systemPrompt = "你是一个智能助手，请根据提供的上下文信息和对话历史，准确回答用户问题。";
+        String systemPrompt = "你是一个智能助手。\n" +
+                "规则：\n" +
+                "1. 如果上下文中提供了【知识库参考信息】或【网络搜索参考信息】，请优先使用这些参考信息来回答。\n" +
+                "2. 只有当参考信息无法回答用户问题时，才允许调用工具获取更多信息。\n" +
+                "3. 不要重复调用工具获取参考信息中已有的内容。";
 
         // ===== 2. 向量查询(RAG) - 检索相关知识，为空时回退到网络搜索 =====
-        //可写为Tool,让大模型自动判断是否调用网络搜索,开源SearXNG
         String ragContext = searchKnowledge(msg);
         String sourceLabel = "知识库参考信息";
+
+        //可写为Tool,让大模型自动判断是否调用网络搜索,开源SearXNG
         if (ragContext.isEmpty()) {
-            ragContext = webSearchService.search(msg);
+            //优化搜索关键词为多个网络搜索词
+            String webQuery = getWebQueryKeyword(msg);
+            ragContext = webSearchService.search(webQuery);
             sourceLabel = "网络搜索参考信息";
             System.out.println("RAG无结果，启用网络搜索: " + ragContext);
         }
@@ -63,6 +73,7 @@ public class OriginChatTestController {
         String historyText = buildHistoryText(history);
 
         // ===== 4. 手动组装完整提示词 =====
+        boolean hasContext = !ragContext.isEmpty();
         StringBuilder userPrompt = new StringBuilder();
         if (!ragContext.isEmpty()) {
             userPrompt.append("【" + sourceLabel + "】\n").append(ragContext).append("\n\n");
@@ -83,8 +94,8 @@ public class OriginChatTestController {
         originChatClient.prompt()
                 .system(systemPrompt)
                 .user(userPrompt.toString())
-                //添加工具
-                .tools(localWeatherTool)
+                //有参考信息时不注册工具，避免模型重复调用工具；无参考信息时才注册工具
+                .tools(hasContext ? new Object[]{} : new Object[]{localWeatherTool})
                 .stream()
                 .content()
                 .timeout(Duration.ofMinutes(3))
@@ -106,6 +117,23 @@ public class OriginChatTestController {
                 .subscribe();
 
         return emitter;
+    }
+
+    /**
+     * 提取搜索关键词
+     */
+    private String getWebQueryKeyword(String msg) {
+        try {
+            String prompt = "你是关键词提取器，把用户问题转换成 1~3 条适合搜索引擎的查询词，逗号分隔，不要多余文字。用户问题：" + msg;
+            Future<String> future = ThreadPoolUtil.getPool().submit(
+                    () -> originChatClient.prompt(prompt).call().content());
+
+            String result = future.get(10, TimeUnit.SECONDS);
+            System.out.println("搜索关键词->" + result);
+            return result;
+        } catch (Exception e) {
+        }
+        return msg;
     }
 
     /**
