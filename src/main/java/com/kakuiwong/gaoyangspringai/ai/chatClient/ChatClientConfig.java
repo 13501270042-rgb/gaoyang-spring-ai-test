@@ -67,4 +67,10 @@ public class ChatClientConfig {
                 .defaultTools(computerAgentTool, weatherAgentTool, knowledgeSearchTool)
                 .build();
     }
+
+    @Bean
+    public ChatClient originChatClient(OllamaChatModel chatModel) {
+        return ChatClient.builder(chatModel)
+                .build();
+    }
 }
