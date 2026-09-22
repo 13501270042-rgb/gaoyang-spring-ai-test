@@ -55,10 +55,11 @@ public class OriginChatTestController {
                 "2. 只有当参考信息无法回答用户问题时，才允许调用工具获取更多信息。\n" +
                 "3. 不要重复调用工具获取参考信息中已有的内容。";
 
-        // ===== 2. 向量查询(RAG) - 检索相关知识，为空时回退到网络搜索 =====
+        // ===== 2. 向量查询(RAG) - 检索相关知识 =====
         String ragContext = searchKnowledge(msg);
         String sourceLabel = "知识库参考信息";
 
+        // ===== 3. 向量查询不到,网络搜索 =====
         //可写为Tool,让大模型自动判断是否调用网络搜索,开源SearXNG
         if (ragContext.isEmpty()) {
             //优化搜索关键词为多个网络搜索词
@@ -68,11 +69,11 @@ public class OriginChatTestController {
             System.out.println("RAG无结果，启用网络搜索: " + ragContext);
         }
 
-        // ===== 3. 上下文管理 - 获取最近10条对话记录 =====
+        // ===== 4. 上下文管理 - 获取最近10条对话记录 =====
         List<SpringAiChatMemory> history = getRecentMessages(sessionId, 10);
         String historyText = buildHistoryText(history);
 
-        // ===== 4. 手动组装完整提示词 =====
+        // ===== 5. 手动组装完整提示词 =====
         boolean hasContext = !ragContext.isEmpty();
         StringBuilder userPrompt = new StringBuilder();
         if (!ragContext.isEmpty()) {
@@ -85,11 +86,11 @@ public class OriginChatTestController {
 
         System.out.println("userPrompt->" + userPrompt);
 
-        // ===== 5. 保存用户消息到记忆表 =====
+        // ===== 6. 保存用户消息到记忆表 =====
         saveMessage(sessionId, msg, MessageType.USER.getValue().toUpperCase());
 
-        // ===== 6. 调用大模型并流式返回 =====
-        final StringBuilder fullResponse = new StringBuilder();
+        // ===== 7. 调用大模型并流式返回 =====
+        final StringBuffer fullResponse = new StringBuffer();
 
         originChatClient.prompt()
                 .system(systemPrompt)
@@ -108,7 +109,7 @@ public class OriginChatTestController {
                     }
                 })
                 .doOnComplete(
-                        // 7. 流结束后保存AI回复到记忆表
+                        // 8. 流结束后保存AI回复到记忆表
                         () -> {
                             saveMessage(sessionId, fullResponse.toString(), MessageType.ASSISTANT.getValue().toUpperCase());
                             emitter.complete();
