@@ -7,8 +7,9 @@ import com.kakuiwong.gaoyangspringai.mapper.SpringAiChatMemoryMapper;
 import com.kakuiwong.gaoyangspringai.service.VectorStoreService;
 import com.kakuiwong.gaoyangspringai.service.WebSearchService;
 import com.kakuiwong.gaoyangspringai.util.ThreadPoolUtil;
-import org.redisson.api.RAtomicLong;
-import org.redisson.api.RSemaphore;
+import org.redisson.api.RPermitExpirableSemaphore;
+import org.redisson.api.RScoredSortedSet;
+import org.redisson.api.RScript;
 import org.redisson.api.RedissonClient;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.MessageType;
@@ -24,6 +25,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,57 +50,91 @@ public class OriginChatTestController {
     WebSearchService webSearchService;
     @Autowired
     RedissonClient redissonClient;
-
-    /** 处理名额信号量key(并发处理1个) */
-    private static final String CHAT_SEMAPHORE_KEY = "origin:chat:semaphore";
-    /** 排队人数计数key */
-    private static final String CHAT_QUEUE_COUNT_KEY = "origin:chat:queue:count";
-    /** 最大排队数 */
-    private static final int MAX_QUEUE_SIZE = 3;
-    /** 排队最长等待时间(秒),需小于SseEmitter超时时间 */
-    private static final long QUEUE_WAIT_SECONDS = 120;
+    //处理名额key(并发处理1个,名额带租约自动过期,防止进程崩溃导致名额永久占用)
+    private static final String CHAT_PERMIT_KEY = "origin:chat:permit";
+    // 排队占位集合key(成员带入队时间戳,崩溃残留按时间自动清理)
+    private static final String CHAT_QUEUE_KEY = "origin:chat:queue:members";
+    // 最大排队数
+    private static final int MAX_QUEUE_SIZE = 1;
+    //大模型超时
+    private static final Duration LLM_TIMEOUT_SECONDS = Duration.ofMinutes(3);
+    //排队最长等待时间(秒)
+    private static final long QUEUE_WAIT_SECONDS = 60 * 1000L;
+    //流式返回超时,大模型超时+排队超时+预留
+    private static final long SSE_TIMEOUT_SECONDS = QUEUE_WAIT_SECONDS + 3 * 60 * 1000L + 20000L;
+    //处理名额租约,大于大模型返回
+    private static final long SLOT_LEASE_SECONDS = 3 * 60 * 1000L + 10000L;
+    // 排队残留阈值
+    private static final long QUEUE_STALE_SECONDS = QUEUE_WAIT_SECONDS + 10000L;
 
     @RequestMapping(value = "/origin/hello", produces = {"text/event-stream;charset=UTF-8"})
     public SseEmitter originHello(String msg,
                                   @RequestParam(defaultValue = "session001") String sessionId) throws IOException {
-        SseEmitter emitter = new SseEmitter(3 * 60 * 1000L);
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_SECONDS);
 
-        // ===== 0. Redisson排队控制:并发处理1个,最多排队5个 =====
-        RSemaphore semaphore = redissonClient.getSemaphore(CHAT_SEMAPHORE_KEY);
+        // ===== 0. Redisson排队控制:并发处理1个,最多排队MAX_QUEUE_SIZE个 =====
+        // 可过期信号量:名额带租约,进程意外退出未释放时,租约到期自动回收,名额不会永久占用
+        RPermitExpirableSemaphore semaphore = redissonClient.getPermitExpirableSemaphore(CHAT_PERMIT_KEY);
         semaphore.trySetPermits(1);
 
-        if (semaphore.tryAcquire()) {
+        // 立即尝试获取处理名额(成功返回permitId,失败返回null)
+        String permitId = null;
+        try {
+            permitId = semaphore.tryAcquire(SLOT_LEASE_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (permitId != null) {
             // 有空闲处理名额,直接处理
-            processChat(emitter, msg, sessionId, semaphore);
+            final String acquiredPermitId = permitId;
+            ThreadPoolUtil.getPool().submit(() -> {
+                processChat(emitter, msg, sessionId, semaphore, acquiredPermitId);
+            });
             return emitter;
         }
 
-        // 无空闲名额,判断是否可排队
-        RAtomicLong queueCount = redissonClient.getAtomicLong(CHAT_QUEUE_COUNT_KEY);
-        long waiting = queueCount.incrementAndGet();
+        // 无空闲名额,判断是否可排队,排队成功后若未主动出队,超时QUEUE_STALE_SECONDS自动出队
+        String requestId = UUID.randomUUID().toString();
+        Long waiting = this.atomicEnqueueAndGetQueueSize(CHAT_QUEUE_KEY, requestId, QUEUE_STALE_SECONDS);
+
+        // 队伍满,直接返回
         if (waiting > MAX_QUEUE_SIZE) {
-            // 队伍满,直接返回
-            queueCount.decrementAndGet();
-            emitter.send(SseEmitter.event().data("队列已满，请稍后再试"));
-            emitter.complete();
+            ThreadPoolUtil.getPool().execute(() -> {
+                removeQueueMember(CHAT_QUEUE_KEY, requestId);
+                try {
+                    emitter.send(SseEmitter.event().data("队列已满，请稍后再试"));
+                } catch (IOException e) {
+                    emitter.completeWithError(e);
+                    return;
+                }
+                emitter.complete();
+            });
             return emitter;
         }
 
         // 需要排队,直接返回排队提示及等待人数,后台异步等待处理名额
-        emitter.send(SseEmitter.event().data("排队中，请等待，当前等待人数: " + waiting));
         ThreadPoolUtil.getPool().submit(() -> {
-            boolean acquired = false;
             try {
-                acquired = semaphore.tryAcquire(QUEUE_WAIT_SECONDS, TimeUnit.SECONDS);
+                emitter.send(SseEmitter.event().data("排队中，请等待，当前等待人数: " + waiting));
+            } catch (IOException e) {
+                emitter.completeWithError(e);
+                return;
+            }
+            String queuedPermitId = null;
+            try {
+                // 排队等待处理名额
+                //QUEUE_WAIT_SECONDS,等待许可时间
+                //SLOT_LEASE_SECONDS,许可自动过期时间
+                queuedPermitId = semaphore.tryAcquire(QUEUE_WAIT_SECONDS, SLOT_LEASE_SECONDS, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } finally {
-                // 无论排队成功还是超时,都离开队伍
-                queueCount.decrementAndGet();
+                // 无论排队成功还是超时,都离开队伍;程序崩溃走不到这里也没关系,残留会被时间戳清理
+                removeQueueMember(CHAT_QUEUE_KEY, requestId);
             }
-            if (acquired) {
+            if (queuedPermitId != null) {
                 // 轮到当前请求,开始处理
-                processChat(emitter, msg, sessionId, semaphore);
+                processChat(emitter, msg, sessionId, semaphore, queuedPermitId);
             } else {
                 // 排队超时,直接返回
                 try {
@@ -116,12 +152,13 @@ public class OriginChatTestController {
     /**
      * 抢到处理名额后执行:组装提示词并调用大模型流式返回,结束后释放处理名额
      */
-    private void processChat(SseEmitter emitter, String msg, String sessionId, RSemaphore semaphore) {
-        // 名额只释放一次(完成/异常/取消只触发其中一个)
+    private void processChat(SseEmitter emitter, String msg, String sessionId,
+                             RPermitExpirableSemaphore semaphore, String permitId) {
+        // 名额只释放一次(完成/异常/取消只触发其中一个);即使全部没执行,租约到期名额也会自动回收
         AtomicBoolean released = new AtomicBoolean(false);
         Runnable releaseSlot = () -> {
             if (released.compareAndSet(false, true)) {
-                semaphore.release();
+                semaphore.tryRelease(permitId);
             }
         };
         try {
@@ -176,7 +213,7 @@ public class OriginChatTestController {
                     .tools(hasContext ? new Object[]{} : new Object[]{localWeatherTool})
                     .stream()
                     .content()
-                    .timeout(Duration.ofMinutes(3))
+                    .timeout(LLM_TIMEOUT_SECONDS)
                     .doOnNext(content -> {
                         fullResponse.append(content);
                         try {
@@ -278,5 +315,39 @@ public class OriginChatTestController {
         memory.setTimestamp(LocalDateTime.now());
         memory.setSequenceId(nextSeq);
         springAiChatMemoryMapper.insert(memory);
+    }
+
+    /**
+     * 原子入队：清理过期占位，新增请求，返回入队后的排队数量
+     *
+     * @param queueKey     zset队列key
+     * @param requestId    请求唯一id
+     * @param staleSeconds 占位超时秒数
+     * @return 入队后当前排队数量
+     */
+    public Long atomicEnqueueAndGetQueueSize(String queueKey, String requestId, long staleSeconds) {
+        long now = System.currentTimeMillis();
+        long staleThreshold = now - staleSeconds * 1000;
+        String lua = """
+                local k = KEYS[1]
+                redis.call('ZREMRANGEBYSCORE', k, 0, ARGV[1])
+                redis.call('ZADD', k, ARGV[2], ARGV[3])
+                return redis.call('ZCARD', k)
+                """;
+        return redissonClient.getScript().eval(
+                RScript.Mode.READ_WRITE,
+                lua,
+                RScript.ReturnType.LONG,
+                Collections.singletonList(queueKey),
+                staleThreshold,
+                now,
+                requestId
+        );
+    }
+
+
+    public boolean removeQueueMember(String queueKey, String requestId) {
+        RScoredSortedSet<String> queueSet = redissonClient.getScoredSortedSet(queueKey);
+        return queueSet.remove(requestId);
     }
 }
