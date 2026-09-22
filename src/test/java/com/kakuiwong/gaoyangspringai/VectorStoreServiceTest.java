@@ -75,13 +75,22 @@ CREATE INDEX ON vector_store USING HNSW (embedding vector_cosine_ops);*/
     void testSimilaritySearch() {
         // 执行语义检索
         List<Document> results = vectorStoreService.similaritySearch("天气", 3);
-        results.forEach(result->{
+        results.forEach(result -> {
             System.out.println(new ObjectMapper().writeValueAsString(result));
         });
     }
 
     @Test
     void originChatTest() {
-        originChatTestController.atomicEnqueueAndGetQueueSize("1","2",1000);
+        //originChatTestController.atomicEnqueueAndGetQueueSize("1", "1", 1000);
+        originChatTestController.removeQueueMember("1", "1");
+    }
+
+    @Test
+    void originChatTest2() {
+        for (int i = 0; i < 10; i++) {
+            originChatTestController.atomicEnqueueAndGetQueueSize("1", "0" + i, 30);
+        }
+
     }
 }

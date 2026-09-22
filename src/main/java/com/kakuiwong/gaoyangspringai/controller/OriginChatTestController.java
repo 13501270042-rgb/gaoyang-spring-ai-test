@@ -57,23 +57,26 @@ public class OriginChatTestController {
     // 排队占位集合key(成员带入队时间戳,崩溃残留按时间自动清理)
     private static final String CHAT_QUEUE_KEY = "origin:chat:queue:members";
     // 最大排队数
-    private static final int MAX_QUEUE_SIZE = 1;
+    private static final int MAX_QUEUE_SIZE = 2;
     //大模型超时
     private static final Duration LLM_TIMEOUT_SECONDS = Duration.ofMinutes(3);
     //排队最长等待时间(秒)
-    private static final long QUEUE_WAIT_SECONDS = 60 * 1000L;
+    private static final long QUEUE_WAIT_SECONDS = 3 * 60;
     //流式返回超时,大模型超时+排队超时+预留
-    private static final long SSE_TIMEOUT_SECONDS = QUEUE_WAIT_SECONDS + 3 * 60 * 1000L + 20000L;
+    private static final long SSE_TIMEOUT_MILLISECOND = QUEUE_WAIT_SECONDS + 3 * 60 * 1000L + 10000L;
     //处理名额租约,大于大模型返回
-    private static final long SLOT_LEASE_SECONDS = 3 * 60 * 1000L + 10000L;
+    private static final long SLOT_LEASE_SECONDS = 3 * 60 + 10L;
     // 排队残留阈值
-    private static final long QUEUE_STALE_SECONDS = QUEUE_WAIT_SECONDS + 10000L;
+    private static final long QUEUE_STALE_SECONDS = QUEUE_WAIT_SECONDS + 10L;
 
     @RequestMapping(value = "/origin/hello", produces = {"text/event-stream;charset=UTF-8"})
     public SseEmitter originHello(String msg,
                                   @RequestParam(defaultValue = "session001") String sessionId) throws IOException {
 
-        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_SECONDS);
+        System.out.println("================================进入方法");
+
+
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MILLISECOND);
 
         // ===== 0. Redisson排队控制:并发处理1个,最多排队MAX_QUEUE_SIZE个 =====
         // 可过期信号量:名额带租约,进程意外退出未释放时,租约到期自动回收,名额不会永久占用
@@ -221,7 +224,7 @@ public class OriginChatTestController {
                         fullResponse.append(content);
                         try {
                             emitter.send(SseEmitter.event().data(content));
-                        } catch (IOException e) {
+                        } catch (Exception e) {
                             emitter.completeWithError(e);
                         }
                     })
@@ -354,7 +357,7 @@ public class OriginChatTestController {
 
 
     public boolean removeQueueMember(String queueKey, String requestId) {
-        RScoredSortedSet<String> queueSet = redissonClient.getScoredSortedSet(queueKey);
-        return queueSet.remove(requestId);
+        RScoredSortedSet<String> queue = redissonClient.getScoredSortedSet(queueKey, StringCodec.INSTANCE);
+        return queue.remove(requestId);
     }
 }
