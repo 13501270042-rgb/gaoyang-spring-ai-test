@@ -11,6 +11,7 @@ import org.redisson.api.RPermitExpirableSemaphore;
 import org.redisson.api.RScoredSortedSet;
 import org.redisson.api.RScript;
 import org.redisson.api.RedissonClient;
+import org.redisson.client.codec.StringCodec;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.document.Document;
@@ -50,6 +51,7 @@ public class OriginChatTestController {
     WebSearchService webSearchService;
     @Autowired
     RedissonClient redissonClient;
+
     //处理名额key(并发处理1个,名额带租约自动过期,防止进程崩溃导致名额永久占用)
     private static final String CHAT_PERMIT_KEY = "origin:chat:permit";
     // 排队占位集合key(成员带入队时间戳,崩溃残留按时间自动清理)
@@ -70,6 +72,7 @@ public class OriginChatTestController {
     @RequestMapping(value = "/origin/hello", produces = {"text/event-stream;charset=UTF-8"})
     public SseEmitter originHello(String msg,
                                   @RequestParam(defaultValue = "session001") String sessionId) throws IOException {
+
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_SECONDS);
 
         // ===== 0. Redisson排队控制:并发处理1个,最多排队MAX_QUEUE_SIZE个 =====
@@ -80,7 +83,7 @@ public class OriginChatTestController {
         // 立即尝试获取处理名额(成功返回permitId,失败返回null)
         String permitId = null;
         try {
-            permitId = semaphore.tryAcquire(SLOT_LEASE_SECONDS, TimeUnit.SECONDS);
+            permitId = semaphore.tryAcquire(0, SLOT_LEASE_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -328,19 +331,23 @@ public class OriginChatTestController {
     public Long atomicEnqueueAndGetQueueSize(String queueKey, String requestId, long staleSeconds) {
         long now = System.currentTimeMillis();
         long staleThreshold = now - staleSeconds * 1000;
+
         String lua = """
                 local k = KEYS[1]
-                redis.call('ZREMRANGEBYSCORE', k, 0, ARGV[1])
-                redis.call('ZADD', k, ARGV[2], ARGV[3])
+                local stale = tonumber(ARGV[1])
+                local score = tonumber(ARGV[2])
+                redis.call('ZREMRANGEBYSCORE', k, '-inf', stale)
+                redis.call('ZADD', k, score, ARGV[3])
                 return redis.call('ZCARD', k)
                 """;
-        return redissonClient.getScript().eval(
+
+        return redissonClient.getScript(StringCodec.INSTANCE).eval(
                 RScript.Mode.READ_WRITE,
                 lua,
                 RScript.ReturnType.LONG,
                 Collections.singletonList(queueKey),
-                staleThreshold,
-                now,
+                String.valueOf(staleThreshold),
+                String.valueOf(now),
                 requestId
         );
     }

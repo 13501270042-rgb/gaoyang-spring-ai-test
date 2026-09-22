@@ -1,9 +1,11 @@
 package com.kakuiwong.gaoyangspringai;
 
+import com.kakuiwong.gaoyangspringai.controller.OriginChatTestController;
 import com.kakuiwong.gaoyangspringai.service.VectorStoreService;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,6 +38,8 @@ CREATE INDEX ON vector_store USING HNSW (embedding vector_cosine_ops);*/
 
     @Resource
     VectorStoreService vectorStoreService;
+    @Autowired
+    OriginChatTestController originChatTestController;
 
     @Test
     void testAddText() {
@@ -74,5 +78,10 @@ CREATE INDEX ON vector_store USING HNSW (embedding vector_cosine_ops);*/
         results.forEach(result->{
             System.out.println(new ObjectMapper().writeValueAsString(result));
         });
+    }
+
+    @Test
+    void originChatTest() {
+        originChatTestController.atomicEnqueueAndGetQueueSize("1","2",1000);
     }
 }

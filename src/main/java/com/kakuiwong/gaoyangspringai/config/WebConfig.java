@@ -1,5 +1,8 @@
 package com.kakuiwong.gaoyangspringai.config;
 
+import org.redisson.codec.JsonJacksonCodec;
+import org.redisson.spring.starter.RedissonAutoConfigurationCustomizer;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
