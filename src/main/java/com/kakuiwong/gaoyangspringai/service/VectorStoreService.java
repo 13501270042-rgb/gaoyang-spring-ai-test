@@ -5,10 +5,7 @@ import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -73,15 +70,14 @@ public class VectorStoreService {
         ));
         results = results.stream()
                 .filter(doc -> {
-                    float score = (float) doc.getMetadata().getOrDefault("score", 0f);
+                    double score = Optional.ofNullable(doc.getScore()).orElse(0d);
                     return score > 0.7;
                 })
                 .collect(Collectors.toList());
         // 按相似度分数降序排列
         results.sort(Comparator.comparingDouble(
                 (Document doc) -> {
-                    Object scoreObj = doc.getMetadata().getOrDefault("score", 1.0f);
-                    return ((Float) scoreObj).doubleValue();
+                    return Optional.ofNullable(doc.getScore()).orElse(1d);
                 }
         ).reversed());
         return results;
