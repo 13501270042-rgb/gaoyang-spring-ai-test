@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.kakuiwong.gaoyangspringai.ai.tools.LocalWeatherTool;
 import com.kakuiwong.gaoyangspringai.constants.UserIntentionEnum;
 import com.kakuiwong.gaoyangspringai.entity.SpringAiChatMemory;
+import com.kakuiwong.gaoyangspringai.mapper.RequestTaskMapper;
 import com.kakuiwong.gaoyangspringai.mapper.SpringAiChatMemoryMapper;
 import com.kakuiwong.gaoyangspringai.util.ThreadPoolUtil;
 import org.redisson.api.RPermitExpirableSemaphore;
@@ -15,6 +16,7 @@ import org.redisson.client.codec.StringCodec;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -22,12 +24,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
 /**
@@ -49,6 +49,10 @@ public class OriginChatTestService {
     WebSearchService webSearchService;
     @Autowired
     RedissonClient redissonClient;
+    @Autowired
+    EmbeddingModel embeddingModel;
+    @Autowired
+    RequestTaskMapper requestTaskMapper;
 
     //处理名额key(并发处理1个,名额带租约自动过期,防止进程崩溃导致名额永久占用)
     private static final String CHAT_PERMIT_KEY = "origin:chat:permit";
@@ -67,7 +71,9 @@ public class OriginChatTestService {
     // 排队残留阈值
     private static final long QUEUE_STALE_SECONDS = QUEUE_WAIT_SECONDS + 10L;
     //图片意图识别
-    private static final List<String> IMG_INTENTION_LIST = Arrays.asList("生成图片", "生成海报", "照片");
+    private static final List<String> IMG_INTENTION_LIST = Arrays.asList("生成图片", "生成海报", "照片", "图片");
+    //图片意图向量相似度阈值,与知识库检索阈值保持一致
+    private static final double IMG_INTENTION_SCORE_THRESHOLD = 0.8d;
 
     public SseEmitter chat(String msg, String sessionId) {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MILLISECOND);
@@ -164,7 +170,23 @@ public class OriginChatTestService {
      */
     private void processChat(SseEmitter emitter, String msg, String sessionId,
                              RPermitExpirableSemaphore semaphore, String permitId) {
+        LongAdder longAdder = new LongAdder();
         try {
+            //排队兜底
+            Long semaphoreStatusInt = requestTaskMapper.semaphore(1, MAX_QUEUE_SIZE,
+                    QUEUE_WAIT_SECONDS - 5);
+            longAdder.add(semaphoreStatusInt);
+            if (longAdder.longValue() < 1) {
+                try {
+                    emitter.send(SseEmitter.event().data("排队失败(兜底)，请稍后再试"));
+                    emitter.complete();
+                    return;
+                } catch (Exception e) {
+                    emitter.completeWithError(e);
+                    return;
+                }
+            }
+
             // ===== 0. 意图识别,根据意图选择对应大模型 =====
             UserIntentionEnum userIntentionEnum = userIntention(msg);
             System.out.println("=====用户意图" + userIntentionEnum.name());
@@ -237,12 +259,28 @@ public class OriginChatTestService {
                                 emitter.complete();
                             })
                     .doOnError(e -> emitter.completeWithError(e))
-                    .doFinally(signal -> semaphore.tryRelease(permitId))
+                    .doFinally(signal -> {
+                        semaphore.tryRelease(permitId);
+                        releaseToDatasouce(longAdder.longValue());
+                    })
                     .subscribe();
         } catch (Exception e) {
-            emitter.completeWithError(e);
+            e.printStackTrace();
+            try {
+                emitter.send(SseEmitter.event().data("服务器异常，请稍后再试"));
+                emitter.complete();
+            } catch (Exception ex) {
+            }
             semaphore.tryRelease(permitId);
+            releaseToDatasouce(longAdder.longValue());
         }
+    }
+
+    public void releaseToDatasouce(long id) {
+        if (id < 1) {
+            return;
+        }
+        requestTaskMapper.deleteById(id);
     }
 
 
@@ -368,12 +406,17 @@ public class OriginChatTestService {
         //根据字符串判断
         for (String imgStr : IMG_INTENTION_LIST) {
             if (msg.contains(imgStr)) {
+                System.out.println("=====图片意图直接包含字符串->" + imgStr);
                 return UserIntentionEnum.IMG;
             }
         }
 
-        //根据相似度判断
-
+        //根据相似度判断: 取msg与各图片意图词的余弦相似度最高分,超过阈值即判定为图片意图
+        double imgScore = imgIntentionScore(msg);
+        if (imgScore >= IMG_INTENTION_SCORE_THRESHOLD) {
+            System.out.println("=====意图向量匹配,图片意图相似度->" + imgScore);
+            return UserIntentionEnum.IMG;
+        }
 
         //根据大模型判断
         try {
@@ -389,5 +432,46 @@ public class OriginChatTestService {
         }
 
         return UserIntentionEnum.TEXT;
+    }
+
+    /**
+     * 计算msg与图片意图词的向量相似度,返回最高得分
+     * 向量化失败时返回0,由后续大模型判断兜底
+     */
+    public double imgIntentionScore(String msg) {
+        try {
+            // 一次请求批量向量化: 下标0为用户问题,其余为图片意图词
+            List<String> texts = new ArrayList<>();
+            texts.add(msg);
+            texts.addAll(IMG_INTENTION_LIST);
+            List<float[]> vectors = embeddingModel.embed(texts);
+
+            float[] msgVector = vectors.get(0);
+            double maxScore = 0d;
+            for (int i = 1; i < vectors.size(); i++) {
+                maxScore = Math.max(maxScore, cosineSimilarity(msgVector, vectors.get(i)));
+            }
+            return maxScore;
+        } catch (Exception e) {
+            return 0d;
+        }
+    }
+
+    /**
+     * 余弦相似度
+     */
+    private double cosineSimilarity(float[] a, float[] b) {
+        double dot = 0d;
+        double normA = 0d;
+        double normB = 0d;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        if (normA == 0d || normB == 0d) {
+            return 0d;
+        }
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 }

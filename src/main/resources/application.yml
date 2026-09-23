@@ -42,6 +42,8 @@
         distance-type: COSINE_DISTANCE
 
 mybatis-plus:
+  #mapper xml位置,默认即classpath*:/mapper/**/*.xml,此处显式声明
+  mapper-locations: classpath*:/mapper/**/*.xml
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 

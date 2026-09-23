@@ -91,6 +91,11 @@ CREATE INDEX ON vector_store USING HNSW (embedding vector_cosine_ops);*/
         for (int i = 0; i < 10; i++) {
             originChatTestService.atomicEnqueueAndGetQueueSize("1", "0" + i, 30);
         }
+    }
 
+    @Test
+    void intention() {
+        double score = originChatTestService.imgIntentionScore("海报天气");
+        System.out.println(score);
     }
 }

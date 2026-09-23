@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kakuiwong.gaoyangspringai.mapper.RequestTaskMapper">
+
+
+    <select id="semaphore" resultType="java.lang.Long">
+        INSERT INTO request_task(user_id)
+        SELECT #{userId} WHERE (
+        SELECT COUNT(*)
+        FROM request_task
+        WHERE user_id = #{userId}
+            AND create_time >= NOW() - (#{queueWaitSeconds} * INTERVAL '1 second')
+            )
+          &lt; #{maxQueueSize}
+            RETURNING id
+    </select>
+</mapper>
