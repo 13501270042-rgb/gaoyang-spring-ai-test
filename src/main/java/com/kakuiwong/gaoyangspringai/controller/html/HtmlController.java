@@ -1,4 +1,4 @@
-package com.kakuiwong.gaoyangspringai.controller;
+package com.kakuiwong.gaoyangspringai.controller.html;
 
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

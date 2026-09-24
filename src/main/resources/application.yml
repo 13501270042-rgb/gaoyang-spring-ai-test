@@ -7,6 +7,22 @@
     password: 123456
     driver-class-name: org.postgresql.Driver
   ai:
+    # 显式声明当前生效的模型提供方,保持原有 Ollama 行为不变。
+    # ollama 与 dashscope 两个 starter 的 spring.ai.model.* 条件均为 matchIfMissing=true,
+    # 不声明会同时注册 ChatModel/EmbeddingModel 导致注入歧义,故必须显式指定。
+    # 切换百炼:把下面两项改成 dashscope,并打开 dashscope 配置(注意 embedding 维度需与
+    # spring.data.vectorstore.pgvector.dimensions 一致)。
+    model:
+      chat: ollama
+      embedding: ollama
+    # dashscope:
+    #   api-key: ${DASHSCOPE_API_KEY}
+    #   chat:
+    #     options:
+    #       model: qwen-plus
+    #   embedding:
+    #     options:
+    #       model: text-embedding-v3
     ollama:
       base-url: http://localhost:11434
       chat:
