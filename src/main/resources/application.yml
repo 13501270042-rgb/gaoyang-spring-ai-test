@@ -15,14 +15,6 @@
     model:
       chat: ollama
       embedding: ollama
-    # dashscope:
-    #   api-key: ${DASHSCOPE_API_KEY}
-    #   chat:
-    #     options:
-    #       model: qwen-plus
-    #   embedding:
-    #     options:
-    #       model: text-embedding-v3
     ollama:
       base-url: http://localhost:11434
       chat:

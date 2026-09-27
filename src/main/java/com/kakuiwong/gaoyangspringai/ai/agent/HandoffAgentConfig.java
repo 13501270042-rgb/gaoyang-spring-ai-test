@@ -3,6 +3,7 @@ package com.kakuiwong.gaoyangspringai.ai.agent;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.agent.flow.agent.LlmRoutingAgent;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -37,7 +38,7 @@ public class HandoffAgentConfig {
     }
 
     @Bean
-    public LlmRoutingAgent routerAgent(ChatModel chatModel,
+    public LlmRoutingAgent routerAgent(OllamaChatModel chatModel,
                                        ReactAgent foodAgent,
                                        ReactAgent travelAgent) {
         return LlmRoutingAgent.builder()
