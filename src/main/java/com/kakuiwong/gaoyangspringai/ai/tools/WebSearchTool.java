@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * @author: gaoyang
- * @Description:
+ * @Description: 互联网实时搜索工具
  */
 @Component
 public class WebSearchTool {
@@ -16,9 +16,10 @@ public class WebSearchTool {
     @Autowired
     WebSearchService webSearchService;
 
-    @Tool(description = "用于互联网实时搜索，当需要最新信息、事实数据时调用，传入搜索query")
-    public String getWeatherAgent(@ToolParam(description = "搜索关键词或搜索语句，由模型根据用户问题生成")
-                                  String query) {
+    @Tool(description = "用于互联网实时搜索，可查询旅游攻略、交通方式、美食推荐、景点信息、最新新闻、事实数据等任何需要实时信息的问题")
+    public String webSearch(@ToolParam(description = "搜索关键词或搜索语句，例如：去西藏的交通方式、成都必吃美食")
+                            String query) {
+        System.out.println("========= WebSearchTool: " + query);
         return webSearchService.search(query);
     }
 }

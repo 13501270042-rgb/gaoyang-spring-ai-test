@@ -15,6 +15,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author: gaoyang
@@ -32,9 +33,21 @@ public class MultiAgentHandoffController {
 
         SseEmitter sseEmitter = new SseEmitter(Duration.ofSeconds(30).toMillis());
 
-        sseEmitter.onCompletion(() -> log.info("SSE连接完成, msg={}", msg));
-        sseEmitter.onTimeout(() -> log.warn("SSE连接超时, msg={}", msg));
-        sseEmitter.onError(e -> log.error("SSE连接异常, msg={}", msg, e));
+        // 原子标志位：跟踪emitter是否已关闭，防止对已完成的emitter调用send/complete
+        AtomicBoolean emitterCompleted = new AtomicBoolean(false);
+
+        sseEmitter.onCompletion(() -> {
+            emitterCompleted.set(true);
+            log.info("SSE连接完成, msg={}", msg);
+        });
+        sseEmitter.onTimeout(() -> {
+            emitterCompleted.set(true);
+            log.warn("SSE连接超时, msg={}", msg);
+        });
+        sseEmitter.onError(e -> {
+            emitterCompleted.set(true);
+            log.error("SSE连接异常, msg={}", msg, e);
+        });
 
 
         llmRoutingAgent.stream(msg)
@@ -44,6 +57,9 @@ public class MultiAgentHandoffController {
                 .doOnCancel(() -> log.warn(">>> Flux 被取消"))
                 .subscribe(
                         output -> {
+                            if (emitterCompleted.get()) {
+                                return;
+                            }
                             try {
                                 if (output instanceof StreamingOutput streamingOutput) {
                                     OutputType type = streamingOutput.getOutputType();
@@ -60,20 +76,35 @@ public class MultiAgentHandoffController {
                                 }
                             } catch (Exception ex) {
                                 log.error("SSE发送数据失败, msg={}", msg, ex);
-                                sseEmitter.complete();
+                                if (emitterCompleted.compareAndSet(false, true)) {
+                                    try {
+                                        sseEmitter.completeWithError(ex);
+                                    } catch (Exception ignored) {
+                                    }
+                                }
                             }
                         },
                         error -> {
                             log.error("Agent流式执行异常", error);
-                            try {
-                                sseEmitter.send(SseEmitter.event().data("执行异常: " + error.getMessage()));
-                            } catch (IOException ignored) {
+                            if (emitterCompleted.compareAndSet(false, true)) {
+                                try {
+                                    sseEmitter.send(SseEmitter.event().data("执行异常: " + error.getMessage()));
+                                } catch (IOException ignored) {
+                                }
+                                try {
+                                    sseEmitter.completeWithError(error);
+                                } catch (Exception ignored) {
+                                }
                             }
-                            sseEmitter.complete();
                         },
                         () -> {
-                            sseEmitter.complete();
-                            log.info("Agent流式执行完成");
+                            if (emitterCompleted.compareAndSet(false, true)) {
+                                try {
+                                    sseEmitter.complete();
+                                } catch (Exception ignored) {
+                                }
+                                log.info("Agent流式执行完成");
+                            }
                         }
                 );
         return sseEmitter;
