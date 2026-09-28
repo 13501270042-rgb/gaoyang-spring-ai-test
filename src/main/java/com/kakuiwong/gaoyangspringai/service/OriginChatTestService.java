@@ -270,9 +270,9 @@ public class OriginChatTestService {
                     //有参考信息时不注册工具，避免模型重复调用工具；无参考信息时才注册工具
                     .tools(hasContext ? new Object[]{} : new Object[]{localWeatherTool})
                     .stream()
-                    .content()
+                    .chatResponse()
                     .timeout(LLM_TIMEOUT_SECONDS)
-                    .doOnNext(content -> {
+                    .doOnNext(chatResponse -> {
                         if (isSseEmitterFinsh.get()) {
                             Disposable disposable = disposableRef.get();
                             if (disposable != null) {
@@ -284,11 +284,23 @@ public class OriginChatTestService {
                             }
                             return;
                         }
+                        String content = chatResponse.getResult().getOutput().getText();
                         fullResponse.append(content);
                         try {
                             emitter.send(SseEmitter.event().data(content));
                         } catch (Exception e) {
                             emitter.completeWithError(e);
+                        }
+                        // 打印token用量(通常只在最后一个chunk中返回)
+                        if (chatResponse.getMetadata() != null
+                                && chatResponse.getMetadata().getUsage() != null) {
+                            long inputTokens = chatResponse.getMetadata().getUsage().getPromptTokens();
+                            long outputTokens = chatResponse.getMetadata().getUsage().getCompletionTokens();
+                            if (inputTokens > 0) {
+                                System.out.println("=====Token用量===== inputTokens:" + inputTokens
+                                        + ", outputTokens:" + outputTokens
+                                        + ", totalTokens:" + (inputTokens + outputTokens));
+                            }
                         }
                     })
                     .doOnComplete(
