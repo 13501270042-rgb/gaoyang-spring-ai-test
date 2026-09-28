@@ -20,6 +20,7 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.Disposable;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -27,6 +28,8 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
@@ -40,7 +43,7 @@ public class OriginChatTestService {
     @Autowired
     ChatClient originChatClient;
     @Autowired
-    private VectorStoreService vectorStoreService;
+    public VectorStoreService vectorStoreService;
     @Autowired
     SpringAiChatMemoryMapper springAiChatMemoryMapper;
     @Autowired
@@ -55,28 +58,30 @@ public class OriginChatTestService {
     RequestTaskMapper requestTaskMapper;
 
     //处理名额key(并发处理1个,名额带租约自动过期,防止进程崩溃导致名额永久占用)
-    private static final String CHAT_PERMIT_KEY = "origin:chat:permit";
+    public static final String CHAT_PERMIT_KEY = "origin:chat:permit";
     // 排队占位集合key(成员带入队时间戳,崩溃残留按时间自动清理)
-    private static final String CHAT_QUEUE_KEY = "origin:chat:queue:members";
+    public static final String CHAT_QUEUE_KEY = "origin:chat:queue:members";
     // 最大排队数
-    private static final int MAX_QUEUE_SIZE = 2;
+    public static final int MAX_QUEUE_SIZE = 2;
     //大模型超时
-    private static final Duration LLM_TIMEOUT_SECONDS = Duration.ofMinutes(3);
+    public static final Duration LLM_TIMEOUT_SECONDS = Duration.ofMinutes(3);
     //排队最长等待时间(秒)
-    private static final long QUEUE_WAIT_SECONDS = 3 * 60;
+    public static final long QUEUE_WAIT_SECONDS = 3 * 60;
     //流式返回超时,大模型超时+排队超时+预留
-    private static final long SSE_TIMEOUT_MILLISECOND = QUEUE_WAIT_SECONDS + 3 * 60 * 1000L + 20000L;
+    public static final long SSE_TIMEOUT_MILLISECOND = QUEUE_WAIT_SECONDS + 3 * 60 * 1000L + 20000L;
     //处理名额租约,大于大模型返回
-    private static final long SLOT_LEASE_SECONDS = 3 * 60 + 10L;
+    public static final long SLOT_LEASE_SECONDS = 3 * 60 + 10L;
     // 排队残留阈值
-    private static final long QUEUE_STALE_SECONDS = QUEUE_WAIT_SECONDS + 10L;
+    public static final long QUEUE_STALE_SECONDS = QUEUE_WAIT_SECONDS + 10L;
     //图片意图识别
-    private static final List<String> IMG_INTENTION_LIST = Arrays.asList("生成图片", "生成海报", "照片", "图片");
+    public static final List<String> IMG_INTENTION_LIST = Arrays.asList("生成图片", "生成海报", "照片", "图片");
     //图片意图向量相似度阈值,与知识库检索阈值保持一致
-    private static final double IMG_INTENTION_SCORE_THRESHOLD = 0.8d;
+    public static final double IMG_INTENTION_SCORE_THRESHOLD = 0.8d;
 
-    public SseEmitter chat(String msg, String sessionId) {
-        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MILLISECOND);
+    public void chat(String msg, String sessionId, SseEmitter emitter, AtomicBoolean isSseEmitterFinsh) {
+
+        System.out.println(" ==========进入方法chat");
+
 
         if (StringUtils.isBlank(msg)) {
             try {
@@ -85,7 +90,7 @@ public class OriginChatTestService {
             } catch (IOException e) {
                 emitter.completeWithError(e);
             }
-            return emitter;
+            return;
         }
 
         // ===== 0. Redisson排队控制:并发处理1个,最多排队MAX_QUEUE_SIZE个 =====
@@ -103,10 +108,8 @@ public class OriginChatTestService {
         if (permitId != null) {
             // 有空闲处理名额,直接处理
             final String acquiredPermitId = permitId;
-            ThreadPoolUtil.getPool().submit(() -> {
-                processChat(emitter, msg, sessionId, semaphore, acquiredPermitId);
-            });
-            return emitter;
+            processChat(emitter, msg, sessionId, semaphore, acquiredPermitId, isSseEmitterFinsh);
+            return;
         }
 
         // 无空闲名额,判断是否可排队,排队成功后若未主动出队,超时QUEUE_STALE_SECONDS自动出队
@@ -115,61 +118,57 @@ public class OriginChatTestService {
 
         // 队伍满,直接返回
         if (waiting > MAX_QUEUE_SIZE) {
-            ThreadPoolUtil.getPool().execute(() -> {
-                removeQueueMember(CHAT_QUEUE_KEY, requestId);
-                try {
-                    emitter.send(SseEmitter.event().data("队列已满，请稍后再试"));
-                } catch (IOException e) {
-                    emitter.completeWithError(e);
-                    return;
-                }
-                emitter.complete();
-            });
-            return emitter;
-        }
-
-        // 需要排队,直接返回排队提示及等待人数,后台异步等待处理名额
-        ThreadPoolUtil.getPool().submit(() -> {
+            removeQueueMember(CHAT_QUEUE_KEY, requestId);
             try {
-                emitter.send(SseEmitter.event().data("排队中，请等待，当前等待人数: " + waiting));
+                emitter.send(SseEmitter.event().data("队列已满，请稍后再试"));
             } catch (IOException e) {
                 emitter.completeWithError(e);
                 return;
             }
-            String queuedPermitId = null;
-            try {
-                // 排队等待处理名额
-                //QUEUE_WAIT_SECONDS,等待许可时间
-                //SLOT_LEASE_SECONDS,许可自动过期时间
-                queuedPermitId = semaphore.tryAcquire(QUEUE_WAIT_SECONDS, SLOT_LEASE_SECONDS, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } finally {
-                // 无论排队成功还是超时,都离开队伍;程序崩溃走不到这里也没关系,残留会被时间戳清理
-                removeQueueMember(CHAT_QUEUE_KEY, requestId);
-            }
-            if (queuedPermitId != null) {
-                // 轮到当前请求,开始处理
-                processChat(emitter, msg, sessionId, semaphore, queuedPermitId);
-            } else {
-                // 排队超时,直接返回
-                try {
-                    emitter.send(SseEmitter.event().data("排队超时，请稍后再试"));
-                    emitter.complete();
-                } catch (Exception e) {
-                    emitter.completeWithError(e);
-                }
-            }
-        });
+            emitter.complete();
+            return;
+        }
 
-        return emitter;
+        // 需要排队,直接返回排队提示及等待人数,后台异步等待处理名额
+        try {
+            emitter.send(SseEmitter.event().data("排队中，请等待，当前等待人数: " + waiting));
+        } catch (IOException e) {
+            emitter.completeWithError(e);
+            return;
+        }
+        String queuedPermitId = null;
+        try {
+            // 排队等待处理名额
+            //QUEUE_WAIT_SECONDS,等待许可时间
+            //SLOT_LEASE_SECONDS,许可自动过期时间
+            queuedPermitId = semaphore.tryAcquire(QUEUE_WAIT_SECONDS, SLOT_LEASE_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            // 无论排队成功还是超时,都离开队伍;程序崩溃走不到这里也没关系,残留会被时间戳清理
+            removeQueueMember(CHAT_QUEUE_KEY, requestId);
+        }
+        if (queuedPermitId != null) {
+            // 轮到当前请求,开始处理
+            processChat(emitter, msg, sessionId, semaphore, queuedPermitId, isSseEmitterFinsh);
+        } else {
+            // 排队超时,直接返回
+            try {
+                emitter.send(SseEmitter.event().data("排队超时，请稍后再试"));
+                emitter.complete();
+            } catch (Exception e) {
+                emitter.completeWithError(e);
+            }
+        }
     }
 
     /**
      * 抢到处理名额后执行:组装提示词并调用大模型流式返回,结束后释放处理名额
      */
-    private void processChat(SseEmitter emitter, String msg, String sessionId,
-                             RPermitExpirableSemaphore semaphore, String permitId) {
+    public void processChat(SseEmitter emitter, String msg, String sessionId,
+                            RPermitExpirableSemaphore semaphore, String permitId,
+                            AtomicBoolean isSseEmitterFinsh) {
+        AtomicReference<Disposable> disposableRef = new AtomicReference<>();
         LongAdder longAdder = new LongAdder();
         try {
             //排队兜底
@@ -185,6 +184,13 @@ public class OriginChatTestService {
                     emitter.completeWithError(e);
                     return;
                 }
+            }
+
+            if (isSseEmitterFinsh.get()) {
+                semaphore.tryRelease(permitId);
+                releaseToDatasouce(longAdder.longValue());
+                emitter.complete();
+                return;
             }
 
             // ===== 0. 意图识别,根据意图选择对应大模型 =====
@@ -206,6 +212,10 @@ public class OriginChatTestService {
             // ===== 3. 向量查询不到,网络搜索 =====
             //可写为Tool,让大模型自动判断是否调用网络搜索,开源SearXNG
             if (ragContext.isEmpty()) {
+                if (isSseEmitterFinsh.get()) {
+                    emitter.complete();
+                    return;
+                }
                 //优化搜索关键词为多个网络搜索词
                 String webQuery = getWebQueryKeyword(msg);
                 ragContext = webSearchService.search(webQuery);
@@ -214,6 +224,12 @@ public class OriginChatTestService {
             }
 
             // ===== 4. 上下文管理 - 获取最近10条对话记录 =====
+            if (isSseEmitterFinsh.get()) {
+                semaphore.tryRelease(permitId);
+                releaseToDatasouce(longAdder.longValue());
+                emitter.complete();
+                return;
+            }
             List<SpringAiChatMemory> history = getRecentMessages(sessionId, 10);
             String historyText = buildHistoryText(history);
 
@@ -231,12 +247,24 @@ public class OriginChatTestService {
             System.out.println("=====userPrompt->" + userPrompt);
 
             // ===== 6. 保存用户消息到记忆表 =====
+            if (isSseEmitterFinsh.get()) {
+                semaphore.tryRelease(permitId);
+                releaseToDatasouce(longAdder.longValue());
+                emitter.complete();
+                return;
+            }
             saveMessage(sessionId, msg, MessageType.USER.getValue().toUpperCase());
 
             // ===== 7. 调用大模型并流式返回 =====
             final StringBuffer fullResponse = new StringBuffer();
 
-            originChatClient.prompt()
+            if (isSseEmitterFinsh.get()) {
+                semaphore.tryRelease(permitId);
+                releaseToDatasouce(longAdder.longValue());
+                emitter.complete();
+                return;
+            }
+            Disposable subscribe = originChatClient.prompt()
                     .system(systemPrompt)
                     .user(userPrompt.toString())
                     //有参考信息时不注册工具，避免模型重复调用工具；无参考信息时才注册工具
@@ -245,6 +273,17 @@ public class OriginChatTestService {
                     .content()
                     .timeout(LLM_TIMEOUT_SECONDS)
                     .doOnNext(content -> {
+                        if (isSseEmitterFinsh.get()) {
+                            Disposable disposable = disposableRef.get();
+                            if (disposable != null) {
+                                disposable.dispose();
+                                semaphore.tryRelease(permitId);
+                                releaseToDatasouce(longAdder.longValue());
+                                emitter.complete();
+                                System.err.println("===============subscribe-dispose");
+                            }
+                            return;
+                        }
                         fullResponse.append(content);
                         try {
                             emitter.send(SseEmitter.event().data(content));
@@ -264,6 +303,8 @@ public class OriginChatTestService {
                         releaseToDatasouce(longAdder.longValue());
                     })
                     .subscribe();
+
+            disposableRef.set(subscribe);
         } catch (Exception e) {
             e.printStackTrace();
             try {
@@ -287,7 +328,7 @@ public class OriginChatTestService {
     /**
      * 提取搜索关键词
      */
-    private String getWebQueryKeyword(String msg) {
+    public String getWebQueryKeyword(String msg) {
         try {
             String prompt = "你是关键词提取器，把用户问题转换成 1~3 条适合搜索引擎的查询词，逗号分隔，不要多余文字。用户问题：" + msg;
             Future<String> future = ThreadPoolUtil.getPool().submit(
@@ -304,7 +345,7 @@ public class OriginChatTestService {
     /**
      * 获取最近N条对话记录
      */
-    private List<SpringAiChatMemory> getRecentMessages(String sessionId, int maxMessages) {
+    public List<SpringAiChatMemory> getRecentMessages(String sessionId, int maxMessages) {
         return springAiChatMemoryMapper.selectList(
                 new LambdaQueryWrapper<SpringAiChatMemory>()
                         .eq(SpringAiChatMemory::getConversationId, sessionId)
@@ -317,7 +358,7 @@ public class OriginChatTestService {
     /**
      * 构建对话历史文本(按时间正序展示)
      */
-    private String buildHistoryText(List<SpringAiChatMemory> messages) {
+    public String buildHistoryText(List<SpringAiChatMemory> messages) {
         if (messages == null || messages.isEmpty()) {
             return "";
         }
@@ -334,7 +375,7 @@ public class OriginChatTestService {
     /**
      * 向量检索知识库，返回相关文档文本
      */
-    private String searchKnowledge(String query) {
+    public String searchKnowledge(String query) {
         List<Document> docs = vectorStoreService.similaritySearch(query, 3);
         if (docs == null || docs.isEmpty()) {
             return "";
@@ -347,7 +388,7 @@ public class OriginChatTestService {
     /**
      * 保存消息到chat_memory表(自动计算sequence_id)
      */
-    private void saveMessage(String sessionId, String content, String type) {
+    public void saveMessage(String sessionId, String content, String type) {
         // 查询当前会话消息总数作为sequence_id
         Long maxSeq = springAiChatMemoryMapper.selectCount(
                 new LambdaQueryWrapper<SpringAiChatMemory>()
@@ -460,7 +501,7 @@ public class OriginChatTestService {
     /**
      * 余弦相似度
      */
-    private double cosineSimilarity(float[] a, float[] b) {
+    public double cosineSimilarity(float[] a, float[] b) {
         double dot = 0d;
         double normA = 0d;
         double normB = 0d;

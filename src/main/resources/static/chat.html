@@ -74,7 +74,8 @@
         const aiDiv = appendMsg('', 'ai');
         aiDiv.classList.add('loading');
         try {
-            const url = BASE_URL + '/origin/hello?msg=' + encodeURIComponent(msg) + '&sessionId=' + encodeURIComponent(sessionId.value);
+            const url = BASE_URL + '/origin/hello?msg=' + encodeURIComponent(msg) +
+                '&sessionId=' + encodeURIComponent(sessionId.value)+ '&_t=' + crypto.randomUUID();
             const resp = await fetch(url);
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
