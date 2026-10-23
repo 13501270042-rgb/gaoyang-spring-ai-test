@@ -15,6 +15,21 @@ spring:
         sse-endpoint: /sse
         # 消息端点（客户端 POST 发送工具调用），默认 /mcp/message
         sse-message-endpoint: /mcp/messages
+      client:
+        enabled: true
+        name: gaoyang-mcp-client
+        version: 1.0.0
+        type: SYNC
+        toolcallback:
+          # 禁用自动注册，McpClientConfig 中已手动创建以连接名为 Bean 名的 McpSyncClient
+          enabled: false
+        # SSE 连接已改为 McpClientConfig 中手动创建，支持 @Qualifier("连接名") 精确注入
+        # sse:
+        #   connections:
+        #     gaoyang-local:
+        #       url: http://localhost:8080/sse
+        #       headers:
+        #         Authorization: Bearer 123
     model:
       chat: ollama
       embedding: ollama

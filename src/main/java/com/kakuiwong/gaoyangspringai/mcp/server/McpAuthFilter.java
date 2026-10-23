@@ -1,4 +1,4 @@
-package com.kakuiwong.gaoyangspringai.mcp;
+package com.kakuiwong.gaoyangspringai.mcp.server;
 
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;

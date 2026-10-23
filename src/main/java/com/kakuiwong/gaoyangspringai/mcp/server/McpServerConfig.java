@@ -1,6 +1,6 @@
-package com.kakuiwong.gaoyangspringai.mcp;
+package com.kakuiwong.gaoyangspringai.mcp.server;
 
-import com.kakuiwong.gaoyangspringai.ai.tools.LocalLifeTool;
+import com.kakuiwong.gaoyangspringai.ai.tools.McpLocalLifeTool;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,14 +18,11 @@ public class McpServerConfig {
     @Value("${mcp.auth.token}")
     private String mcpAuthToken;
 
-    /**
-     * 将 LocalLifeTool 注册为 MCP 工具提供者
-     * MCP Server starter 会自动发现 ToolCallbackProvider 中的 @Tool 方法并暴露为 MCP 工具
-     */
+
     @Bean
-    public ToolCallbackProvider localLifeToolCallbackProvider(LocalLifeTool localLifeTool) {
+    public ToolCallbackProvider localLifeToolCallbackProvider(McpLocalLifeTool mcpLocalLifeTool) {
         return MethodToolCallbackProvider.builder()
-                .toolObjects(localLifeTool)
+                .toolObjects(mcpLocalLifeTool)
                 .build();
     }
 
