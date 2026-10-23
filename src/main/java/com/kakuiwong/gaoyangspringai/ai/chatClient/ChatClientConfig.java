@@ -6,14 +6,17 @@ package com.kakuiwong.gaoyangspringai.ai.chatClient;
  */
 
 import com.kakuiwong.gaoyangspringai.ai.tools.*;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
+import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.ollama.api.OllamaApi;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.tool.execution.ToolExecutionExceptionProcessor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -23,6 +26,7 @@ import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
 
+@Slf4j
 @Configuration
 public class ChatClientConfig {
 
@@ -49,7 +53,16 @@ public class ChatClientConfig {
     KnowledgeSearchTool knowledgeSearchTool;
 
     @Bean
-    public OllamaChatModel ollamaChatModel() {
+    public ToolExecutionExceptionProcessor toolExecutionExceptionProcessor() {
+        return ex -> {
+            // 这里可以打点、脱敏、映射错误码
+            log.warn("[tool-exec] {}", ex.getMessage());
+            return "ERROR: 工具执行失败(code=TOOL_EXEC_FAILURE)，请稍后再试。";
+        };
+    }
+
+    @Bean
+    public OllamaChatModel ollamaChatModel(ToolExecutionExceptionProcessor toolExecutionExceptionProcessor) {
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
         requestFactory.setReadTimeout(Duration.ofMinutes(5));
 
@@ -64,9 +77,15 @@ public class ChatClientConfig {
                 .numPredict(numPredict)
                 .build();
 
+        // 将自定义 ToolExecutionExceptionProcessor 接入 ToolCallingManager
+        ToolCallingManager toolCallingManager = ToolCallingManager.builder()
+                .toolExecutionExceptionProcessor(toolExecutionExceptionProcessor)
+                .build();
+
         return OllamaChatModel.builder()
                 .ollamaApi(ollamaApi)
                 .defaultOptions(defaultOptions)
+                .toolCallingManager(toolCallingManager)
                 .build();
     }
 
