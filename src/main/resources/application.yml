@@ -17,9 +17,14 @@ spring:
           enabled: true
         streamable-http:
           connections:
-            external-mcp:
-              url: http://localhost:8088
-              endpoint: /mcp
+          # MCP 服务 1：本地生活服务（当前进程自身 MCP Server）
+          #  life:
+          #    url: http://localhost:8088
+          #    endpoint: /mcp
+          # MCP 服务 2：天气服务（示例，需另行启动）
+          # weather:
+          #   url: http://localhost:8089
+          #   endpoint: /mcp
       server:
         name: gaoyang-mcp-server
         version: 1.0.0

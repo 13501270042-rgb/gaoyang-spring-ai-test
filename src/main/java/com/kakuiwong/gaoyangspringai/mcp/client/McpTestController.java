@@ -1,53 +1,44 @@
 package com.kakuiwong.gaoyangspringai.mcp.client;
 
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.tool.ToolCallbackProvider;
-import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.stream.Collectors;
-
 /**
  * @author: gaoyang
- * @Description: MCP Client 测试控制器，通过 /mcptest 访问外部 MCP 服务暴露的工具
+ * @Description: MCP Client 测试控制器，演示三种多 MCP 服务使用方式：
+ * 1. /mcptest         — 聚合所有 MCP 服务的工具（默认）
+ * 2. /mcptest/life    — 仅使用 life 服务的工具
+ * 3. /mcptest/dynamic — 通过参数动态指定使用哪个 MCP 服务
  */
 @RestController
 public class McpTestController {
 
-    private final ChatClient mcpChatClient;
-    private final ToolCallbackProvider mcpTools;
+    @Autowired
+    ChatClient lifeChatClient;
 
-    public McpTestController(ChatClient.Builder builder,
-                             @Qualifier("mcpToolCallbacks") ToolCallbackProvider mcpTools) {
-        this.mcpTools = mcpTools;
-        this.mcpChatClient = builder
-                .defaultSystem("你是一个智能助手，请使用可用的工具来回答用户问题")
-                .defaultToolCallbacks(mcpTools)
-                .build();
-    }
 
     /**
-     * 测试 MCP 工具调用：将用户问题发送给大模型，模型自动选择 MCP 工具执行
+     * 仅使用 life 服务的工具回答问题
      */
-    @GetMapping("/mcptest")
-    public String mcpTest(@RequestParam String msg) {
-        return mcpChatClient.prompt()
+    @GetMapping("/mcptest/life")
+    public String lifeChat(@RequestParam String msg) {
+        return lifeChatClient.prompt()
                 .user(msg)
                 .call()
                 .content();
     }
 
     /**
-     * 列出外部 MCP Server 提供的所有可用工具名称
+     * 仅使用 weather 服务的工具回答问题
      */
-    @GetMapping("/mcptest/tools")
-    public List<String> listTools() {
-        return Arrays.stream(mcpTools.getToolCallbacks())
-                .map(cb -> cb.getToolDefinition().name())
-                .collect(Collectors.toList());
-    }
+    // @GetMapping("/mcptest/weather")
+    // public String weatherChat(@RequestParam String msg) {
+    //     return weatherClientByMcp.prompt()
+    //             .user(msg)
+    //             .call()
+    //             .content();
+    // }
 }
