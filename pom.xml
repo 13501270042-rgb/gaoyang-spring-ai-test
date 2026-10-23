@@ -119,6 +119,11 @@
             <groupId>com.alibaba.cloud.ai</groupId>
             <artifactId>spring-ai-alibaba-agent-framework</artifactId>
         </dependency>
+        <!-- MCP Server: 将 @Tool 注解的方法暴露为 MCP 工具（SSE 传输，基于 WebMvc） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

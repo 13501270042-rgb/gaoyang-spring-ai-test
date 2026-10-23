@@ -1,4 +1,4 @@
-﻿spring:
+spring:
   application:
     name: gaoyang-spring-ai
   datasource:
@@ -7,6 +7,14 @@
     password: 123456
     driver-class-name: org.postgresql.Driver
   ai:
+    mcp:
+      server:
+        name: gaoyang-mcp-server
+        version: 1.0.0
+        # SSE 连接端点（客户端 GET 建立长连接），默认 /sse
+        sse-endpoint: /sse
+        # 消息端点（客户端 POST 发送工具调用），默认 /mcp/message
+        sse-message-endpoint: /mcp/messages
     model:
       chat: ollama
       embedding: ollama
@@ -49,6 +57,11 @@ mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+mcp:
+  auth:
+    # MCP Server 凭证，客户端需携带 Authorization: Bearer <token> 访问
+    token: 123
 
 searxng:
   base-url: http://localhost:8888
